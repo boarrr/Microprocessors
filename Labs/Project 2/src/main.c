@@ -99,6 +99,11 @@ int main()
         if (!checkCollision(player_x, player_y + BLOCK_SIZE, current_piece)) {
             // Move the piece down
             player_y += BLOCK_SIZE;
+            // Handle right input by increasing the players current X
+            if ((GPIOB->IDR & (1 << 4)) == 0 && player_x < (SCREEN_WIDTH - (BLOCK_SIZE * 4))) {
+                player_x += 10;
+            }
+
         } else {
             // Collision detected: lock the piece to the board
             for (uint8_t row = 0; row < 4; row++) {
@@ -286,4 +291,12 @@ void setupIO()
 {
     RCC->AHBENR |= (1 << 18) + (1 << 17); // Enable Ports A and B
     display_begin();                      // Initialize the display
+    pinMode(GPIOB,4,0);
+	pinMode(GPIOB,5,0);
+	pinMode(GPIOA,8,0);
+	pinMode(GPIOA,11,0);
+	enablePullUp(GPIOB,4);
+	enablePullUp(GPIOB,5);
+	enablePullUp(GPIOA,11);
+	enablePullUp(GPIOA,8);
 }
