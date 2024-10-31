@@ -6,8 +6,6 @@
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 160
 
-// Display range for single character -> 0 - 118
-
 void initClock(void);
 void initSysTick(void);
 void SysTick_Handler(void);
@@ -15,23 +13,26 @@ void delay(volatile uint32_t dly);
 void setupIO();
 void enablePullUp(GPIO_TypeDef *Port, uint32_t BitNumber);
 void pinMode(GPIO_TypeDef *Port, uint32_t BitNumber, uint32_t Mode);
-
 void handleInput(int*, int*);
 
 volatile uint32_t milliseconds;
 
+// Spaceships bitmap stored in an array
 const uint16_t spaceship[] = {
     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,54057,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7663,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7663,7663,7663,0,0,0,0,0,0,0,0,0,0,0,0,0,7663,7663,7663,0,0,0,0,0,0,0,0,0,0,0,54057,0,7663,7663,7663,0,54057,0,0,0,0,0,0,0,0,0,7663,0,7663,54057,7663,0,7663,0,0,0,0,0,0,0,54057,0,0,7663,54057,7663,54057,7663,0,0,54057,0,0,0,0,0,7663,0,7663,7663,7663,7663,7663,7663,7663,0,7663,0,0,0,0,0,7663,7663,7663,7663,54057,7663,54057,7663,7663,7663,7663,0,0,0,0,0,7663,7663,0,54057,54057,0,54057,54057,0,7663,7663,0,0,0,0,0,7663,0,0,0,0,0,0,0,0,0,7663,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
 int main()
 {
+    // Players starting coordinates
     int player_x = 0, player_y = 60;
 
+    // Initialiase the clock, system tick for timing and input / output
 	initClock();
 	initSysTick();
 	setupIO();
 	
+    // TODO: Put main game loop in its own function
 	while(1)
 	{
         putImage(player_x, player_y, 16, 16, spaceship, 0, 0);
@@ -44,6 +45,7 @@ int main()
 
 	return 0;
 }
+
 
 void handleInput(int *player_x, int *player_y)
 {
