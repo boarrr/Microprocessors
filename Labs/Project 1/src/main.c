@@ -14,6 +14,7 @@ void setupIO();
 void enablePullUp(GPIO_TypeDef *Port, uint32_t BitNumber);
 void pinMode(GPIO_TypeDef *Port, uint32_t BitNumber, uint32_t Mode);
 void handleInput(int*, int*);
+void gameLoop();
 
 volatile uint32_t milliseconds;
 
@@ -24,28 +25,46 @@ const uint16_t spaceship[] = {
 
 int main()
 {
-    // Players starting coordinates
-    int player_x = 0, player_y = 60;
 
     // Initialiase the clock, system tick for timing and input / output
 	initClock();
 	initSysTick();
 	setupIO();
 	
-    // TODO: Put main game loop in its own function
-	while(1)
-	{
-        putImage(player_x, player_y, 16, 16, spaceship, 0, 0);
-        printNumberX2(player_x, 10, 10, RGBToWord(255,255,255), 0);
-
-        handleInput(&player_x, &player_y);
-
-        delay(25);
-	}
+    gameLoop();
 
 	return 0;
 }
 
+void gameLoop()
+{
+    // Placeholders for player position and bullet position
+    int player_x = 0, player_y = (SCREEN_WIDTH / 2);
+    int bullet_x = 0, bullet_y = 0, bullet_exist = 0;
+
+    while(1)
+	{
+        putImage(player_x, player_y, 16, 16, spaceship, 0, 0);
+        handleInput(&player_x, &player_y);
+
+        if (!bullet_exist) {
+            bullet_x = player_x + (SHIP_WIDTH / 2) - 1;
+            bullet_y = player_y;
+            bullet_exist = 1;
+        }
+
+        fillRectangle(bullet_x, bullet_y, 2, 4, RGBToWord(0,0,0));
+        bullet_y-=2;
+        fillRectangle(bullet_x, bullet_y, 2, 4, RGBToWord(255,255,255));
+
+        if (bullet_y < 0) {
+            fillRectangle(bullet_x, bullet_y, 2, 4, RGBToWord(0,0,0));
+            bullet_exist = 0;
+        }
+        
+        delay(25);
+	}
+}
 
 void handleInput(int *player_x, int *player_y)
 {
@@ -53,6 +72,7 @@ void handleInput(int *player_x, int *player_y)
     if ((GPIOB->IDR & (1 << 4)) == 0) {
         (*player_x)++;
 
+        // If the player is going too far off screen
         if (*player_x > (SCREEN_WIDTH - SHIP_WIDTH)) {
             fillRectangle(*player_x, *player_y, SHIP_WIDTH, SHIP_WIDTH, 0);
             *player_x = 0;
@@ -63,6 +83,7 @@ void handleInput(int *player_x, int *player_y)
     if ((GPIOB->IDR & (1 << 5)) == 0) {
         (*player_x)--;
 
+        // If the player is going too far off screen
         if (*player_x < 0) {
             fillRectangle(*player_x, *player_y, SHIP_WIDTH, SHIP_WIDTH, 0);
             *player_x = (SCREEN_WIDTH - SHIP_WIDTH);
@@ -73,6 +94,7 @@ void handleInput(int *player_x, int *player_y)
     if ((GPIOA->IDR & (1 << 8)) == 0) {
         (*player_y)--;
 
+        // If the player is going too far off screen
         if (*player_y < 0) {
             fillRectangle(*player_x, *player_y, SHIP_WIDTH, SCREEN_HEIGHT, 0);
             *player_y = (SCREEN_HEIGHT - SHIP_HEIGHT);
@@ -83,12 +105,14 @@ void handleInput(int *player_x, int *player_y)
     if ((GPIOA->IDR & (1 << 11)) == 0) {
         (*player_y)++;
 
+        // If the player is going too far off screen
         if (*player_y > (SCREEN_HEIGHT - SHIP_HEIGHT)) {
             fillRectangle(*player_x, *player_y, SHIP_WIDTH, SCREEN_HEIGHT, 0);
             *player_y = 0;
         }
     }    
 }
+
 void initSysTick(void)
 {
 	SysTick->LOAD = 48000;
