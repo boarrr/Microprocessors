@@ -1,6 +1,7 @@
 #include <stm32f031x6.h>
 #include "display.h"
 
+// Symbolic names for constants in the game
 #define SHIP_WIDTH 16
 #define SHIP_HEIGHT 16
 #define BULLET_WIDTH 2
@@ -42,10 +43,10 @@ int readADC(void);
 // Game Function Prototypes
 void playSound(uint32_t, uint32_t);
 void mainMenu(void);
-void gameLoop(struct player*);
+void gameLoop(struct player*, struct bullet*);
 void handleInput(struct player*);
 void drawShip(struct player*);
-void drawBullet(int*, int*, int*, int, int, int, int*);
+void drawBullet(struct player*, struct bullet*);
 
 // Global variables
 volatile uint32_t milliseconds;
@@ -91,11 +92,19 @@ int main()
         .sprites = {spaceship_left_full, spaceship_left, spaceship, spaceship_right, spaceship_right_full}
     };
 
+    // Create and initialize a basic bullet instance, with placeholders until game start
+    struct bullet bullet1 = {
+        .x = -1,
+        .y = -1,
+        .direction = -1,
+        .exists = 0
+    };
+
     // Display the main menu at game start
     mainMenu();
 
     // Primary game loop, passing the player instance
-    gameLoop(&player1);
+    gameLoop(&player1, &bullet1);
 
     return 0;
 }
@@ -122,15 +131,15 @@ void mainMenu(void)
     }
 }
 
-void gameLoop(struct player *p) 
+void gameLoop(struct player *p, struct bullet *b) 
 {
-    // Placeholders for bullet position
-    int bullet_x = 0, bullet_y = 0, bullet_exists = 0, bullet_dir = -1;
-
     // Primary game loop, each iteration of the loop will equal one frame
     while (1) {
-        // Get the rotation from the ADC and map it between 0 and 4
+        // Get the rotation from the ADC and map it between 0 and 4 by dividing by 819
+        // This works as the ADC goes up 4095 as a base range
         p->rotation = readADC() / 819;
+
+        // Account for any noise from the ADC by mapping any result over 4 to 4
         if (p->rotation > 4)
             p->rotation = 4;
 
@@ -140,8 +149,8 @@ void gameLoop(struct player *p)
         // Handle player input
         handleInput(p);
 
-        // Draw the bullet based on current bullet position, player position, rotation, and bullet direction
-        drawBullet(&bullet_x, &bullet_y, &bullet_exists, p->x, p->y, p->rotation, &bullet_dir);
+        // Draw any bullet that exists
+        drawBullet(p, b);
 
         // Delay for 25ms to prevent the game from running too fast
         delay(25);
@@ -153,76 +162,56 @@ void drawShip(struct player *p) {
     putImage(p->x, p->y, SHIP_WIDTH, SHIP_HEIGHT, p->sprites[p->rotation], 0, 0);
 }
 
-// Draw the bullet based off of the current bullet position, player position, rotation, and bullet direction
-void drawBullet(int *bullet_x, int *bullet_y, int *bullet_exists, int player_x, int player_y, int rotation, int *bullet_dir)
+// Draw the bullet based on the current bullet position, player position, rotation, and bullet direction
+void drawBullet(struct player *p, struct bullet *b)
 {
-    
-    // If bullet does not exist, create a bullet based off of the players current rotation angle, and store it in bullet_dir
-    // 0 = left, 1 = left-up, 2 = up, 3 = right-up, 4 = right
-    if (!(*bullet_exists)) {
-        switch (rotation) {
-            case 0:
-                *bullet_x = player_x; 
-                *bullet_y = player_y + (SHIP_HEIGHT / 2) - 1;
-                *bullet_dir = 0;
-                break;
-            case 1:
-                *bullet_x = player_x; 
-                *bullet_y = player_y;
-                *bullet_dir = 1;
-                break;
-            case 2:
-                *bullet_x = player_x + (SHIP_WIDTH / 2) - 1; 
-                *bullet_y = player_y;
-                *bullet_dir = 2;
-                break;
-            case 3:
-                *bullet_x = player_x + (SHIP_WIDTH);
-                *bullet_y = player_y;
-                *bullet_dir = 3;
-            break;
-            case 4:
-                *bullet_x = player_x + (SHIP_WIDTH); 
-                *bullet_y = player_y + (SHIP_HEIGHT / 2) - 1;
-                *bullet_dir = 4;
-                break;
-        }
+    // If bullet does not exist
+    if (!b->exists) {
 
-        playSound(500, 25);
-        *bullet_exists = 1;
-    }
-    else
-    {
-        fillRectangle(*bullet_x, *bullet_y, BULLET_WIDTH, BULLET_HEIGHT, RGBToWord(0,0,0));
+        // All potential offsets to the bullets position stored in a 2D array
+        const uint16_t bullet_offsets[5][2] = {
+            {0, SHIP_HEIGHT / 2 - 1},                           // Left
+            {0, 0},                                             // Left-Up
+            {SHIP_WIDTH / 2 - 1, 0},                            // Up
+            {SHIP_WIDTH - BULLET_WIDTH, 0},                     // Right-Up
+            {SHIP_WIDTH - BULLET_WIDTH, SHIP_HEIGHT / 2 - 1}    // Right
+        };
         
-        switch (*bullet_dir) {
-            case 0:
-                *bullet_x -= BULLET_SPEED; 
-                break;
-            case 1:
-                *bullet_x -= BULLET_SPEED / 2;
-                *bullet_y -= BULLET_SPEED / 2;
-                break;
-            case 2:
-                *bullet_y -= BULLET_SPEED;
-                break;
-            case 3:
-                *bullet_x += BULLET_SPEED / 2;
-                *bullet_y -= BULLET_SPEED / 2;
-            break;
-            case 4:
-                *bullet_x += BULLET_SPEED;
-                break;
+        // Set initial position and direction of the bullet based on the players rotation
+        // The direction is based on the rotation, with 0 being left and 4 being right
+        // Find the offset based on the rotation and set the bullet position
+        b->x = p->x + bullet_offsets[p->rotation][0];
+        b->y = p->y + bullet_offsets[p->rotation][1];
+        b->direction = p->rotation;
+        
+        // Set bullet to exist and play shooting sound
+        playSound(500, 25);
+        b->exists = 1;
+    }
+    else {
+        // Clear the current bullet position on the screen
+        fillRectangle(b->x, b->y, BULLET_WIDTH, BULLET_HEIGHT, RGBToWord(0, 0, 0));
+        
+        // Update bullet position based on direction
+        switch (b->direction) {
+            case 0: b->x -= BULLET_SPEED; break;                                // Left
+            case 1: b->x -= BULLET_SPEED / 2; b->y -= BULLET_SPEED / 2; break;  // Left-Up
+            case 2: b->y -= BULLET_SPEED; break;                                // Up
+            case 3: b->x += BULLET_SPEED / 2; b->y -= BULLET_SPEED / 2; break;  // Right-Up
+            case 4: b->x += BULLET_SPEED; break;                                // Right
         }
-        fillRectangle(*bullet_x, *bullet_y, BULLET_WIDTH, BULLET_HEIGHT, RGBToWord(255,255,255));
 
-        // If bullet goes out of bounds
-        if (*bullet_y < 0 || *bullet_y > SCREEN_HEIGHT || *bullet_x < 0 || *bullet_x > SCREEN_WIDTH) {
-            fillRectangle(*bullet_x, *bullet_y, BULLET_WIDTH, BULLET_HEIGHT, RGBToWord(0,0,0));
-            *bullet_exists = 0;
+        // Draw the bullet at the new position
+        fillRectangle(b->x, b->y, BULLET_WIDTH, BULLET_HEIGHT, RGBToWord(255, 255, 255));
+
+        // Check if bullet goes out of bounds and remove it
+        if (b->x < 0 || b->x > SCREEN_WIDTH || b->y < 0 || b->y > SCREEN_HEIGHT) {
+            fillRectangle(b->x, b->y, BULLET_WIDTH, BULLET_HEIGHT, RGBToWord(0,0,0));
+            b->exists = 0;
         }
     }
 }
+
 
 void handleInput(struct player *p)
 {
