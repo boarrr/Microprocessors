@@ -1,5 +1,6 @@
 #include <stm32f031x6.h>
 #include "display.h"
+#include <stdlib.h>
 
 // Symbolic names for constants in the game
 #define SHIP_WIDTH 16
@@ -7,6 +8,10 @@
 #define BULLET_WIDTH 2
 #define BULLET_HEIGHT 2
 #define BULLET_SPEED 4
+#define FIRE_RATE 500
+#define METEOR_WIDTH 8
+#define METEOR_HEIGHT 8
+#define METEOR_SPEED 1
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 160
 
@@ -26,6 +31,16 @@ struct bullet {
     uint8_t y;
     uint8_t direction;
     uint8_t exists;
+    uint32_t last_fired;
+};
+
+// Meteor struct
+struct meteor {
+    uint8_t x;
+    int16_t y;
+    uint8_t health;
+    uint8_t exists;
+    uint8_t spawn;
 };
 
 // MPU Function Prototypes
@@ -42,11 +57,14 @@ int readADC(void);
 
 // Game Function Prototypes
 void playSound(uint32_t, uint32_t);
-void mainMenu(void);
-void gameLoop(struct player*, struct bullet*);
+void mainMenu(struct player*);
+void gameLoop(struct player*, struct bullet*, struct  meteor*);
 void handleInput(struct player*);
 void drawShip(struct player*);
 void drawBullet(struct player*, struct bullet*);
+void drawMeteor(struct meteor*, struct player*);
+void displayLife(struct player*);
+void checkCollision(struct player*, struct bullet*, struct meteor*);
 
 // Global variables
 volatile uint32_t milliseconds;
@@ -85,7 +103,7 @@ int main()
     // Create and initialize the player instance
     struct player player1 = {
         .x = (SCREEN_WIDTH / 2) - (SHIP_WIDTH / 2),
-        .y = SCREEN_HEIGHT / 2,
+        .y = 135,
         .rotation = 2,
         .lives = 3,
         .score = 0,
@@ -100,18 +118,27 @@ int main()
         .exists = 0
     };
 
+    struct meteor meteor1 = {
+        .x = 0,
+        .y = 0,
+        .health = 1,
+        .exists = 0,
+        .spawn = 8
+    };
+
     // Display the main menu at game start
-    mainMenu();
+    mainMenu(&player1);
 
     // Primary game loop, passing the player instance
-    gameLoop(&player1, &bullet1);
+    gameLoop(&player1, &bullet1, &meteor1);
 
     return 0;
 }
 
-void mainMenu(void)
+void mainMenu(struct player *p)
 {
     uint8_t game_start = 0;
+    fillRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, RGBToWord(0,0,0));
 
     playSound(0,0);
 
@@ -119,29 +146,46 @@ void mainMenu(void)
         uint8_t rotation = readADC() / 819;
 
         printText("Move knob center", 10, SCREEN_HEIGHT / 2.5, RGBToWord(255,255,255), RGBToWord(0,0,0));
-        printText("and press up", 20, SCREEN_HEIGHT / 2, RGBToWord(255,255,255), RGBToWord(0,0,0));
+        printText("and press ->", 20, SCREEN_HEIGHT / 2, RGBToWord(255,255,255), RGBToWord(0,0,0));
         printText("to start", 35, SCREEN_HEIGHT / 1.65, RGBToWord(255,255,255), RGBToWord(0,0,0));
 
         // If the potentiometer is in the center and the up button is pressed, start the game
         if (rotation == 2 && (GPIOA->IDR & (1 << 8)) == 0) {
             // Clear the screen and start the game
             fillRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, RGBToWord(0,0,0));
+            p->lives = 3;
+            p->score = 0;
             game_start = 1;
         }
     }
 }
 
-void gameLoop(struct player *p, struct bullet *b) 
+void gameLoop(struct player *p, struct bullet *b, struct meteor *m) 
 {
+    GPIOA->ODR |= (1 << 9);
+    GPIOA->ODR |= (1 << 10);
+    GPIOA->ODR |= (1 << 12);
+
     // Primary game loop, each iteration of the loop will equal one frame
     while (1) {
+
+
         // Get the rotation from the ADC and map it between 0 and 4 by dividing by 819
         // This works as the ADC goes up 4095 as a base range
         p->rotation = readADC() / 819;
+        srand(milliseconds);
 
         // Account for any noise from the ADC by mapping any result over 4 to 4
         if (p->rotation > 4)
             p->rotation = 4;
+
+
+        // Draw home base and score
+        fillRectangle(0, SCREEN_HEIGHT - 5, SCREEN_WIDTH, 5, RGBToWord(255,255,255));
+        printNumber(p->score, 0, 5, RGBToWord(255,255,255), RGBToWord(0,0,0));
+
+        // Draw the player's lives using the LEDS
+        displayLife(p);
 
         // Draw the ship based on the player's current rotation and position
         drawShip(p);
@@ -152,8 +196,14 @@ void gameLoop(struct player *p, struct bullet *b)
         // Draw any bullet that exists
         drawBullet(p, b);
 
-        // Delay for 25ms to prevent the game from running too fast
-        delay(25);
+        // Draw the meteor if it exists
+        drawMeteor(m, p);
+
+        // Check for collision between the bullet and the meteor, or the meteor and the player / base
+        checkCollision(p, b, m);
+
+        // Delay for 15ms to prevent the game from running too fast
+        delay(15);
     }
 }
 
@@ -165,10 +215,11 @@ void drawShip(struct player *p) {
 // Draw the bullet based on the current bullet position, player position, rotation, and bullet direction
 void drawBullet(struct player *p, struct bullet *b)
 {
-    // If bullet does not exist
-    if (!b->exists) {
+    // If bullet does not exist, and the last bullet was fired FIRE_RATE ago, fire a new bullet
+    if (!b->exists && milliseconds - b->last_fired > FIRE_RATE) {
 
         // All potential offsets to the bullets position stored in a 2D array
+        // Index 0 is x offset, index 1 is y offset
         const uint16_t bullet_offsets[5][2] = {
             {0, SHIP_HEIGHT / 2 - 1},                           // Left
             {0, 0},                                             // Left-Up
@@ -186,6 +237,7 @@ void drawBullet(struct player *p, struct bullet *b)
         
         // Set bullet to exist and play shooting sound
         playSound(500, 25);
+        b->last_fired = milliseconds;
         b->exists = 1;
     }
     else {
@@ -212,6 +264,94 @@ void drawBullet(struct player *p, struct bullet *b)
     }
 }
 
+void drawMeteor(struct meteor *m, struct player *p)
+{
+    // If meteor does not exist, spawn a new one at a random x location
+    if (!m->exists) {  
+        m->spawn = rand() % 15; 
+        m->x = 5 + (METEOR_WIDTH * m->spawn);
+        m->y = 0;
+        m->exists = 1;
+    }
+    else { // If meteor exists, move it down the screen
+
+        fillRectangle(m->x, m->y, METEOR_WIDTH, METEOR_HEIGHT, RGBToWord(0, 0, 0));
+
+        m->y += METEOR_SPEED;
+
+        fillRectangle(m->x, m->y, METEOR_WIDTH, METEOR_HEIGHT, RGBToWord(255, 255, 255));
+
+        // If the meteor reaches the bottom of the screen, remove it and deduct a life
+        if (m->y >= SCREEN_HEIGHT - METEOR_HEIGHT) {
+            fillRectangle(m->x, m->y, METEOR_WIDTH, METEOR_HEIGHT, RGBToWord(0, 0, 0));
+
+            p->lives--;
+            m->exists = 0;
+        }
+    }
+}
+
+void checkCollision(struct player *p, struct bullet *b, struct meteor *m)
+{
+    // Check if the bullet exists and if the meteor exists
+    if (b->exists && m->exists) {
+        // Check if the bullet is within the meteor bounds
+        if (b->x >= m->x && b->x <= m->x + METEOR_WIDTH && b->y >= m->y && b->y <= m->y + METEOR_HEIGHT) {
+            // Play explosion sound and remove the meteor
+            playSound(1000, 50);
+            fillRectangle(m->x, m->y, METEOR_WIDTH, METEOR_HEIGHT, RGBToWord(0, 0, 0));
+            m->exists = 0;
+            p->score += 10;
+        }
+    }
+
+    // Check if the meteor is within the player bounds
+    if (m->y + METEOR_HEIGHT >= p->y && m->y <= p->y + SHIP_HEIGHT && m->x + METEOR_WIDTH >= p->x && m->x <= p->x + SHIP_WIDTH) {
+        // Play explosion sound and remove the meteor
+        playSound(1000, 50);
+        fillRectangle(m->x, m->y, METEOR_WIDTH, METEOR_HEIGHT, RGBToWord(0, 0, 0));
+        m->exists = 0;
+        p->lives--;
+    }
+}
+
+void displayLife(struct player *p)
+{
+    // Display the player's lives using the LEDS
+    switch (p->lives) {
+        case 3:
+            GPIOA->ODR |= (1 << 9);
+            GPIOA->ODR |= (1 << 10);
+            GPIOA->ODR |= (1 << 12);
+            break;
+        case 2:
+            GPIOA->ODR &= ~(1 << 9);
+            GPIOA->ODR |= (1 << 10);
+            GPIOA->ODR |= (1 << 12);
+            break;
+        case 1:
+            GPIOA->ODR &= ~(1 << 9);
+            GPIOA->ODR &= ~(1 << 10);
+            GPIOA->ODR |= (1 << 12);
+            break;
+        case 0:
+            GPIOA->ODR &= ~(1 << 9);
+            GPIOA->ODR &= ~(1 << 10);
+            GPIOA->ODR &= ~(1 << 12);
+            break;
+    }
+
+    // If the player has no lives left, display game over screen
+    if (p->lives == 0) {
+        fillRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, RGBToWord(0,0,0));
+        printText("Game Over", 10, SCREEN_HEIGHT / 2.5, RGBToWord(255,255,255), RGBToWord(0,0,0));
+        printText("Score:", 20, SCREEN_HEIGHT / 2, RGBToWord(255,255,255), RGBToWord(0,0,0));
+        printNumber(p->score, 50, SCREEN_HEIGHT / 1.65, RGBToWord(255,255,255), RGBToWord(0,0,0));
+        delay(2500);
+        mainMenu(p);
+    }
+}
+
 
 void handleInput(struct player *p)
 {
@@ -229,6 +369,7 @@ void handleInput(struct player *p)
             p->x--;
     }
 
+    /*
     // Handle up input by increasing the players current Y
     if ((GPIOA->IDR & (1 << 8)) == 0) {
         // Check if player is within bounds first
@@ -241,7 +382,7 @@ void handleInput(struct player *p)
         // Check if player is within bounds first
         if (p->y < (SCREEN_HEIGHT - SHIP_HEIGHT))
             p->y++;
-    }    
+    }*/ 
 }
 
 void initSysTick(void)
@@ -358,6 +499,9 @@ void setupIO()
 	pinMode(GPIOB,5,0);
 	pinMode(GPIOA,8,0);
 	pinMode(GPIOA,11,0);
+    pinMode(GPIOA,9,1);
+    pinMode(GPIOA,10,1);
+    pinMode(GPIOA,12,1);
 	enablePullUp(GPIOB,4);
 	enablePullUp(GPIOB,5);
 	enablePullUp(GPIOA,11);
