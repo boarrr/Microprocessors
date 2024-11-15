@@ -8,7 +8,7 @@
 #define BULLET_WIDTH 2
 #define BULLET_HEIGHT 2
 #define BULLET_SPEED 4
-#define FIRE_RATE 500
+#define FIRE_RATE 600
 #define METEOR_WIDTH 8
 #define METEOR_HEIGHT 8
 #define METEOR_SPEED 1
@@ -181,7 +181,7 @@ void gameLoop(struct player *p, struct bullet *b, struct meteor *m)
 
 
         // Draw home base and score
-        fillRectangle(0, SCREEN_HEIGHT - 5, SCREEN_WIDTH, 5, RGBToWord(255,255,255));
+        fillRectangle(0, SCREEN_HEIGHT - 5, SCREEN_WIDTH, METEOR_HEIGHT, RGBToWord(255,255,255));
         printNumber(p->score, 0, 5, RGBToWord(255,255,255), RGBToWord(0,0,0));
 
         // Draw the player's lives using the LEDS
@@ -258,8 +258,8 @@ void drawBullet(struct player *p, struct bullet *b)
 
         // Check if bullet goes out of bounds and remove it
         if (b->x < 0 || b->x > SCREEN_WIDTH || b->y < 0 || b->y > SCREEN_HEIGHT) {
-            fillRectangle(b->x, b->y, BULLET_WIDTH, BULLET_HEIGHT, RGBToWord(0,0,0));
             b->exists = 0;
+            fillRectangle(b->x, b->y, BULLET_WIDTH, BULLET_HEIGHT, RGBToWord(0,0,0));
         }
     }
 }
@@ -280,14 +280,6 @@ void drawMeteor(struct meteor *m, struct player *p)
         m->y += METEOR_SPEED;
 
         fillRectangle(m->x, m->y, METEOR_WIDTH, METEOR_HEIGHT, RGBToWord(255, 255, 255));
-
-        // If the meteor reaches the bottom of the screen, remove it and deduct a life
-        if (m->y >= SCREEN_HEIGHT - METEOR_HEIGHT) {
-            fillRectangle(m->x, m->y, METEOR_WIDTH, METEOR_HEIGHT, RGBToWord(0, 0, 0));
-
-            p->lives--;
-            m->exists = 0;
-        }
     }
 }
 
@@ -295,7 +287,8 @@ void checkCollision(struct player *p, struct bullet *b, struct meteor *m)
 {
     // Check if the bullet exists and if the meteor exists
     if (b->exists && m->exists) {
-        // Check if the bullet is within the meteor bounds
+
+        // Check if the bullet is within the meteor bounds, if so, players shot hit the meteor
         if (b->x >= m->x && b->x <= m->x + METEOR_WIDTH && b->y >= m->y && b->y <= m->y + METEOR_HEIGHT) {
             // Play explosion sound and remove the meteor
             playSound(1000, 50);
@@ -305,13 +298,20 @@ void checkCollision(struct player *p, struct bullet *b, struct meteor *m)
         }
     }
 
-    // Check if the meteor is within the player bounds
+    // Check if the meteor is within the player bounds, if so, the meteor has hit the player
     if (m->y + METEOR_HEIGHT >= p->y && m->y <= p->y + SHIP_HEIGHT && m->x + METEOR_WIDTH >= p->x && m->x <= p->x + SHIP_WIDTH) {
         // Play explosion sound and remove the meteor
-        playSound(1000, 50);
+        playSound(250, 50);
         fillRectangle(m->x, m->y, METEOR_WIDTH, METEOR_HEIGHT, RGBToWord(0, 0, 0));
         m->exists = 0;
         p->lives--;
+    }
+
+    // If the meteor reaches the bottom of the screen, remove it and deduct a life
+    if (m->y >= SCREEN_HEIGHT - 5) {
+        playSound(250, 50);
+        p->lives--;
+        m->exists = 0;
     }
 }
 
@@ -368,21 +368,6 @@ void handleInput(struct player *p)
         if (p->x > 0)
             p->x--;
     }
-
-    /*
-    // Handle up input by increasing the players current Y
-    if ((GPIOA->IDR & (1 << 8)) == 0) {
-        // Check if player is within bounds first
-        if (p->y > 0)
-            p->y--;
-    }
-
-    // Handle down input by decreasing the players current Y
-    if ((GPIOA->IDR & (1 << 11)) == 0) {
-        // Check if player is within bounds first
-        if (p->y < (SCREEN_HEIGHT - SHIP_HEIGHT))
-            p->y++;
-    }*/ 
 }
 
 void initSysTick(void)
